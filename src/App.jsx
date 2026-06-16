@@ -286,6 +286,12 @@ const supabase = new SupabaseClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
+// Debug logging
+console.log('[DEBUG] Supabase environment variables:');
+console.log('[DEBUG] VITE_SUPABASE_URL:', import.meta.env.VITE_SUPABASE_URL ? 'SET ✓' : 'EMPTY ✗');
+console.log('[DEBUG] VITE_SUPABASE_ANON_KEY:', import.meta.env.VITE_SUPABASE_ANON_KEY ? 'SET ✓' : 'EMPTY ✗');
+console.log('[DEBUG] Supabase enabled:', supabase.enabled);
+
 function useAppData() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
