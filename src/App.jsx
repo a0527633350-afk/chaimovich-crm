@@ -161,7 +161,7 @@ const BILLING_FREQUENCY_OPTIONS = [
 ];
 
 /* ============================================================
-   STORAGE LAYER
+   STORAGE LAYER (with Supabase fallback)
    ============================================================ */
 const STORAGE_KEY = 'crm-data-v1';
 
@@ -175,6 +175,37 @@ const EMPTY_DATA = {
   meta: { businessName: 'ח.י. חיימוביץ פתרונות תקשורת' },
 };
 
+// Initialize Supabase client
+let supabaseClient = null;
+try {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  
+  if (supabaseUrl && supabaseAnonKey) {
+    supabaseClient = {
+      url: supabaseUrl,
+      key: supabaseAnonKey,
+      async request(method, path, body = null) {
+        const options = {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.key}`,
+            'apikey': this.key,
+          },
+        };
+        if (body) options.body = JSON.stringify(body);
+        
+        const response = await fetch(`${this.url}/rest/v1${path}`, options);
+        if (!response.ok) throw new Error(`Supabase error: ${response.statusText}`);
+        return response.json();
+      },
+    };
+  }
+} catch (e) {
+  console.warn('Supabase initialization failed:', e);
+}
+
 function useAppData() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -183,14 +214,33 @@ function useAppData() {
   useEffect(() => {
     (async () => {
       try {
-        const result = await window.storage.get(STORAGE_KEY);
-        if (result && result.value) {
-          const parsed = JSON.parse(result.value);
-          setData({ ...EMPTY_DATA, ...parsed });
+        let loadedData = EMPTY_DATA;
+        
+        // Try Supabase first
+        if (supabaseClient) {
+          try {
+            const result = await supabaseClient.request('GET', '/rpc/get_crm_data');
+            if (result && result.data) {
+              loadedData = JSON.parse(result.data);
+            }
+          } catch (e) {
+            console.warn('Supabase read failed, using localStorage:', e);
+            const stored = await window.storage.get(STORAGE_KEY);
+            if (stored && stored.value) {
+              loadedData = JSON.parse(stored.value);
+            }
+          }
         } else {
-          setData(EMPTY_DATA);
+          // Fallback to localStorage
+          const stored = await window.storage.get(STORAGE_KEY);
+          if (stored && stored.value) {
+            loadedData = JSON.parse(stored.value);
+          }
         }
+        
+        setData({ ...EMPTY_DATA, ...loadedData });
       } catch (e) {
+        console.error('Data load error:', e);
         setData(EMPTY_DATA);
       } finally {
         setLoading(false);
@@ -201,9 +251,22 @@ function useAppData() {
   const save = useCallback(async (newData) => {
     setData(newData);
     try {
-      await window.storage.set(STORAGE_KEY, JSON.stringify(newData));
+      // Save to both Supabase and localStorage
+      const dataStr = JSON.stringify(newData);
+      
+      if (supabaseClient) {
+        try {
+          await supabaseClient.request('POST', '/rpc/save_crm_data', { data: dataStr });
+        } catch (e) {
+          console.warn('Supabase write failed, falling back to localStorage:', e);
+        }
+      }
+      
+      // Always save to localStorage as backup
+      await window.storage.set(STORAGE_KEY, dataStr);
     } catch (e) {
       setError('שגיאה בשמירת הנתונים');
+      console.error('Save error:', e);
     }
   }, []);
 
