@@ -161,7 +161,7 @@ const BILLING_FREQUENCY_OPTIONS = [
 ];
 
 /* ============================================================
-   STORAGE LAYER (Supabase only)
+   SUPABASE CLIENT & STORAGE LAYER
    ============================================================ */
 const STORAGE_KEY = 'crm-data-v1';
 
@@ -175,70 +175,116 @@ const EMPTY_DATA = {
   meta: { businessName: 'ח.י. חיימוביץ פתרונות תקשורת' },
 };
 
-// Supabase client
-const supabaseClient = {
-  url: import.meta.env.VITE_SUPABASE_URL || '',
-  key: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
-  
-  async query(sql) {
-    if (!this.url || !this.key) {
-      console.warn('Supabase not configured');
-      return null;
-    }
+// Supabase REST client
+class SupabaseClient {
+  constructor(url, key) {
+    this.url = url;
+    this.key = key;
+    this.enabled = !!(url && key);
+  }
+
+  async request(method, endpoint, body = null) {
+    if (!this.enabled) throw new Error('Supabase not configured');
     
-    try {
-      const response = await fetch(`${this.url}/rest/v1/rpc/execute_sql`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.key}`,
-          'apikey': this.key,
-        },
-        body: JSON.stringify({ sql }),
-      });
-      
-      if (!response.ok) {
-        console.warn('Supabase query failed:', response.statusText);
-        return null;
-      }
-      
-      return await response.json();
-    } catch (e) {
-      console.warn('Supabase error:', e);
-      return null;
+    const options = {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.key}`,
+        'apikey': this.key,
+      },
+    };
+    if (body) options.body = JSON.stringify(body);
+    
+    const response = await fetch(`${this.url}/rest/v1${endpoint}`, options);
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Supabase error: ${response.status} ${error}`);
     }
-  },
+    return response.json();
+  }
 
-  async getData() {
-    // Try to get from a simple table or use localStorage as fallback
-    try {
-      // For now, we'll use localStorage as the persistent storage
-      // since Supabase tables aren't set up yet
-      if (typeof window !== 'undefined' && window.localStorage) {
-        const stored = window.localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          return JSON.parse(stored);
-        }
-      }
-    } catch (e) {
-      console.warn('Storage read error:', e);
-    }
-    return null;
-  },
+  async getClients() {
+    return this.request('GET', '/clients?select=*');
+  }
 
-  async saveData(data) {
-    try {
-      // Save to localStorage first
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-        return true;
-      }
-    } catch (e) {
-      console.warn('Storage write error:', e);
-    }
-    return false;
-  },
-};
+  async getJobs() {
+    return this.request('GET', '/jobs?select=*');
+  }
+
+  async getPayments() {
+    return this.request('GET', '/payments?select=*');
+  }
+
+  async getCalendarEvents() {
+    return this.request('GET', '/calendar_events?select=*');
+  }
+
+  async getFollowUps() {
+    return this.request('GET', '/follow_ups?select=*');
+  }
+
+  async insertClient(client) {
+    return this.request('POST', '/clients', client);
+  }
+
+  async insertJob(job) {
+    return this.request('POST', '/jobs', job);
+  }
+
+  async insertPayment(payment) {
+    return this.request('POST', '/payments', payment);
+  }
+
+  async insertCalendarEvent(event) {
+    return this.request('POST', '/calendar_events', event);
+  }
+
+  async insertFollowUp(item) {
+    return this.request('POST', '/follow_ups', item);
+  }
+
+  async updateClient(id, data) {
+    return this.request('PATCH', `/clients?id=eq.${id}`, data);
+  }
+
+  async updateJob(id, data) {
+    return this.request('PATCH', `/jobs?id=eq.${id}`, data);
+  }
+
+  async updateCalendarEvent(id, data) {
+    return this.request('PATCH', `/calendar_events?id=eq.${id}`, data);
+  }
+
+  async updateFollowUp(id, data) {
+    return this.request('PATCH', `/follow_ups?id=eq.${id}`, data);
+  }
+
+  async deleteClient(id) {
+    return this.request('DELETE', `/clients?id=eq.${id}`);
+  }
+
+  async deleteJob(id) {
+    return this.request('DELETE', `/jobs?id=eq.${id}`);
+  }
+
+  async deletePayment(id) {
+    return this.request('DELETE', `/payments?id=eq.${id}`);
+  }
+
+  async deleteCalendarEvent(id) {
+    return this.request('DELETE', `/calendar_events?id=eq.${id}`);
+  }
+
+  async deleteFollowUp(id) {
+    return this.request('DELETE', `/follow_ups?id=eq.${id}`);
+  }
+}
+
+const supabase = new SupabaseClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
 function useAppData() {
   const [data, setData] = useState(null);
@@ -248,9 +294,36 @@ function useAppData() {
   useEffect(() => {
     (async () => {
       try {
-        const stored = await supabaseClient.getData();
-        const loadedData = stored || EMPTY_DATA;
-        setData({ ...EMPTY_DATA, ...loadedData });
+        let loadedData = { ...EMPTY_DATA };
+        
+        if (supabase.enabled) {
+          try {
+            const [clients, jobs, payments, calendarEvents, followUps] = await Promise.all([
+              supabase.getClients().catch(() => []),
+              supabase.getJobs().catch(() => []),
+              supabase.getPayments().catch(() => []),
+              supabase.getCalendarEvents().catch(() => []),
+              supabase.getFollowUps().catch(() => []),
+            ]);
+            
+            loadedData = {
+              ...EMPTY_DATA,
+              clients: clients || [],
+              jobs: jobs || [],
+              payments: payments || [],
+              calendarEvents: calendarEvents || [],
+              followUps: followUps || [],
+            };
+          } catch (e) {
+            console.warn('Supabase load failed, using empty data:', e);
+            loadedData = EMPTY_DATA;
+          }
+        } else {
+          console.warn('Supabase not configured, using empty data');
+          loadedData = EMPTY_DATA;
+        }
+        
+        setData(loadedData);
       } catch (e) {
         console.error('Data load error:', e);
         setData(EMPTY_DATA);
@@ -262,8 +335,98 @@ function useAppData() {
 
   const save = useCallback(async (newData) => {
     setData(newData);
+    
+    if (!supabase.enabled) {
+      console.warn('Supabase not enabled, data not saved');
+      return;
+    }
+
     try {
-      await supabaseClient.saveData(newData);
+      // Save clients
+      for (const client of newData.clients) {
+        try {
+          await supabase.request('POST', '/clients', {
+            ...client,
+            updatedAt: Date.now(),
+          }).catch(async () => {
+            // If insert fails, try update
+            await supabase.updateClient(client.id, {
+              ...client,
+              updatedAt: Date.now(),
+            });
+          });
+        } catch (e) {
+          console.warn('Failed to save client:', client.id, e);
+        }
+      }
+
+      // Save jobs
+      for (const job of newData.jobs) {
+        try {
+          await supabase.request('POST', '/jobs', {
+            ...job,
+            updatedAt: Date.now(),
+          }).catch(async () => {
+            await supabase.updateJob(job.id, {
+              ...job,
+              updatedAt: Date.now(),
+            });
+          });
+        } catch (e) {
+          console.warn('Failed to save job:', job.id, e);
+        }
+      }
+
+      // Save payments
+      for (const payment of newData.payments) {
+        try {
+          await supabase.request('POST', '/payments', {
+            ...payment,
+            updatedAt: Date.now(),
+          }).catch(async () => {
+            await supabase.request('PATCH', `/payments?id=eq.${payment.id}`, {
+              ...payment,
+              updatedAt: Date.now(),
+            });
+          });
+        } catch (e) {
+          console.warn('Failed to save payment:', payment.id, e);
+        }
+      }
+
+      // Save calendar events
+      for (const event of newData.calendarEvents) {
+        try {
+          await supabase.request('POST', '/calendar_events', {
+            ...event,
+            updatedAt: Date.now(),
+          }).catch(async () => {
+            await supabase.updateCalendarEvent(event.id, {
+              ...event,
+              updatedAt: Date.now(),
+            });
+          });
+        } catch (e) {
+          console.warn('Failed to save calendar event:', event.id, e);
+        }
+      }
+
+      // Save follow-ups
+      for (const item of newData.followUps) {
+        try {
+          await supabase.request('POST', '/follow_ups', {
+            ...item,
+            updatedAt: Date.now(),
+          }).catch(async () => {
+            await supabase.updateFollowUp(item.id, {
+              ...item,
+              updatedAt: Date.now(),
+            });
+          });
+        } catch (e) {
+          console.warn('Failed to save follow-up:', item.id, e);
+        }
+      }
     } catch (e) {
       setError('שגיאה בשמירת הנתונים');
       console.error('Save error:', e);
