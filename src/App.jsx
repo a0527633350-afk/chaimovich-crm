@@ -282,8 +282,8 @@ class SupabaseClient {
 }
 
 const supabase = new SupabaseClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
+  import.meta.env.VITE_SUPABASE_URL || 'https://aBcDe.supabase.co',
+  import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_YfnwESrnAMT3s4XNQ_vgrovIqb'
 );
 
 // Debug logging
