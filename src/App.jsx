@@ -1,3 +1,8 @@
+bash
+
+cat /mnt/user-data/outputs/chaimovich-crm/src/App.jsx | head -c 5000
+Output
+
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Home, Users, Briefcase, Calendar as CalendarIcon, Bell, ListTodo,
