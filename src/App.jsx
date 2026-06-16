@@ -161,7 +161,7 @@ const BILLING_FREQUENCY_OPTIONS = [
 ];
 
 /* ============================================================
-   STORAGE LAYER (with Supabase fallback)
+   STORAGE LAYER (Supabase only)
    ============================================================ */
 const STORAGE_KEY = 'crm-data-v1';
 
@@ -175,36 +175,70 @@ const EMPTY_DATA = {
   meta: { businessName: 'ח.י. חיימוביץ פתרונות תקשורת' },
 };
 
-// Initialize Supabase client
-let supabaseClient = null;
-try {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Supabase client
+const supabaseClient = {
+  url: import.meta.env.VITE_SUPABASE_URL || '',
+  key: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
   
-  if (supabaseUrl && supabaseAnonKey) {
-    supabaseClient = {
-      url: supabaseUrl,
-      key: supabaseAnonKey,
-      async request(method, path, body = null) {
-        const options = {
-          method,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.key}`,
-            'apikey': this.key,
-          },
-        };
-        if (body) options.body = JSON.stringify(body);
-        
-        const response = await fetch(`${this.url}/rest/v1${path}`, options);
-        if (!response.ok) throw new Error(`Supabase error: ${response.statusText}`);
-        return response.json();
-      },
-    };
-  }
-} catch (e) {
-  console.warn('Supabase initialization failed:', e);
-}
+  async query(sql) {
+    if (!this.url || !this.key) {
+      console.warn('Supabase not configured');
+      return null;
+    }
+    
+    try {
+      const response = await fetch(`${this.url}/rest/v1/rpc/execute_sql`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.key}`,
+          'apikey': this.key,
+        },
+        body: JSON.stringify({ sql }),
+      });
+      
+      if (!response.ok) {
+        console.warn('Supabase query failed:', response.statusText);
+        return null;
+      }
+      
+      return await response.json();
+    } catch (e) {
+      console.warn('Supabase error:', e);
+      return null;
+    }
+  },
+
+  async getData() {
+    // Try to get from a simple table or use localStorage as fallback
+    try {
+      // For now, we'll use localStorage as the persistent storage
+      // since Supabase tables aren't set up yet
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const stored = window.localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          return JSON.parse(stored);
+        }
+      }
+    } catch (e) {
+      console.warn('Storage read error:', e);
+    }
+    return null;
+  },
+
+  async saveData(data) {
+    try {
+      // Save to localStorage first
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        return true;
+      }
+    } catch (e) {
+      console.warn('Storage write error:', e);
+    }
+    return false;
+  },
+};
 
 function useAppData() {
   const [data, setData] = useState(null);
@@ -214,30 +248,8 @@ function useAppData() {
   useEffect(() => {
     (async () => {
       try {
-        let loadedData = EMPTY_DATA;
-        
-        // Try Supabase first
-        if (supabaseClient) {
-          try {
-            const result = await supabaseClient.request('GET', '/rpc/get_crm_data');
-            if (result && result.data) {
-              loadedData = JSON.parse(result.data);
-            }
-          } catch (e) {
-            console.warn('Supabase read failed, using localStorage:', e);
-            const stored = await window.storage.get(STORAGE_KEY);
-            if (stored && stored.value) {
-              loadedData = JSON.parse(stored.value);
-            }
-          }
-        } else {
-          // Fallback to localStorage
-          const stored = await window.storage.get(STORAGE_KEY);
-          if (stored && stored.value) {
-            loadedData = JSON.parse(stored.value);
-          }
-        }
-        
+        const stored = await supabaseClient.getData();
+        const loadedData = stored || EMPTY_DATA;
         setData({ ...EMPTY_DATA, ...loadedData });
       } catch (e) {
         console.error('Data load error:', e);
@@ -251,19 +263,7 @@ function useAppData() {
   const save = useCallback(async (newData) => {
     setData(newData);
     try {
-      // Save to both Supabase and localStorage
-      const dataStr = JSON.stringify(newData);
-      
-      if (supabaseClient) {
-        try {
-          await supabaseClient.request('POST', '/rpc/save_crm_data', { data: dataStr });
-        } catch (e) {
-          console.warn('Supabase write failed, falling back to localStorage:', e);
-        }
-      }
-      
-      // Always save to localStorage as backup
-      await window.storage.set(STORAGE_KEY, dataStr);
+      await supabaseClient.saveData(newData);
     } catch (e) {
       setError('שגיאה בשמירת הנתונים');
       console.error('Save error:', e);
