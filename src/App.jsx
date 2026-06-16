@@ -123,6 +123,9 @@ function gregorianToHebrewStr(dateObj) {
 function uid(prefix = 'id') {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
+function makeViewToken() {
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+}
 function fmtCurrency(n) {
   const num = Number(n) || 0;
   return '₪' + num.toLocaleString('he-IL', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
